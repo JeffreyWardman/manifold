@@ -99,7 +99,8 @@ namespace manifold {
 
 std::shared_ptr<CsgNode> CsgNode::Boolean(
     const std::shared_ptr<CsgNode> &second, OpType op) {
-  if (auto opNode = std::dynamic_pointer_cast<CsgOpNode>(second)) {
+  if (second->GetNodeType() != CsgNodeType::Leaf) {
+    auto opNode = static_cast<CsgOpNode *>(second.get());
     // "this" is not a CsgOpNode (which overrides Boolean), but if "second" is
     // and the operation is commutative, we let it built the tree.
     if ((op == OpType::Add || op == OpType::Intersect)) {
@@ -360,32 +361,37 @@ std::shared_ptr<CsgNode> CsgOpNode::Boolean(
     }
   };
 
-  auto self = std::dynamic_pointer_cast<CsgOpNode>(shared_from_this());
-  if (IsOp(op) && !isReused(self)) {
+  auto self = shared_from_this();
+  auto self_op = static_cast<CsgOpNode *>(self.get());
+  if (IsOp(op) && !isReused(self_op)) {
     auto impl = impl_.GetGuard();
     copyChildren(impl->children_, transform_);
   } else {
     children.push_back(self);
   }
 
-  auto secondOp = std::dynamic_pointer_cast<CsgOpNode>(second);
-  auto canInlineSecondOp = [&]() {
-    switch (op) {
-      case OpType::Add:
-      case OpType::Intersect:
-        return secondOp->IsOp(op);
-      case OpType::Subtract:
-        return secondOp->IsOp(OpType::Add);
-      default:
-        return false;
-    }
-  };
-
-  if (secondOp && canInlineSecondOp() && !isReused(secondOp)) {
-    auto secondImpl = secondOp->impl_.GetGuard();
-    copyChildren(secondImpl->children_, secondOp->transform_);
-  } else {
+  if (second->GetNodeType() == CsgNodeType::Leaf) {
     children.push_back(second);
+  } else {
+    auto secondOp = static_cast<CsgOpNode *>(second.get());
+    auto canInlineSecondOp = [&]() {
+      switch (op) {
+        case OpType::Add:
+        case OpType::Intersect:
+          return secondOp->IsOp(op);
+        case OpType::Subtract:
+          return secondOp->IsOp(OpType::Add);
+        default:
+          return false;
+      }
+    };
+
+    if (canInlineSecondOp() && !isReused(secondOp)) {
+      auto secondImpl = secondOp->impl_.GetGuard();
+      copyChildren(secondImpl->children_, secondOp->transform_);
+    } else {
+      children.push_back(second);
+    }
   }
 
   return std::make_shared<CsgOpNode>(children, op);
@@ -413,8 +419,7 @@ std::shared_ptr<CsgLeafNode> CsgOpNode::ToLeafNode() const {
       case CsgNodeType::Intersection: {
         std::vector<std::shared_ptr<const Manifold::Impl>> impls;
         for (auto &child : children_) {
-          impls.push_back(
-              std::dynamic_pointer_cast<CsgLeafNode>(child)->GetImpl());
+          impls.push_back(static_cast<CsgLeafNode *>(child.get())->GetImpl());
         }
         children_.clear();
         children_.push_back(std::make_shared<CsgLeafNode>(
@@ -424,12 +429,14 @@ std::shared_ptr<CsgLeafNode> CsgOpNode::ToLeafNode() const {
       case CsgNodeType::Difference: {
         // take the lhs out and treat the remaining nodes as the rhs, perform
         // union optimization for them
-        auto lhs = std::dynamic_pointer_cast<CsgLeafNode>(children_.front());
+        auto lhs = children_.front();
         children_.erase(children_.begin());
         BatchUnion();
-        auto rhs = std::dynamic_pointer_cast<CsgLeafNode>(children_.front());
+        auto rhs = children_.front();
         children_.clear();
-        Boolean3 boolean(*lhs->GetImpl(), *rhs->GetImpl(), OpType::Subtract);
+        Boolean3 boolean(*(static_cast<CsgLeafNode *>(lhs.get()))->GetImpl(),
+                         *(static_cast<CsgLeafNode *>(rhs.get()))->GetImpl(),
+                         OpType::Subtract);
         children_.push_back(
             std::make_shared<CsgLeafNode>(std::make_shared<Manifold::Impl>(
                 boolean.Result(OpType::Subtract))));
@@ -443,7 +450,7 @@ std::shared_ptr<CsgLeafNode> CsgOpNode::ToLeafNode() const {
   }
   // children_ must contain only one CsgLeafNode now, and its Transform will
   // give CsgLeafNode as well
-  cache_ = std::dynamic_pointer_cast<CsgLeafNode>(
+  cache_ = std::static_pointer_cast<CsgLeafNode>(
       children_.front()->Transform(transform_));
   return cache_;
 }
@@ -542,7 +549,7 @@ void CsgOpNode::BatchUnion() const {
     Vec<Box> boxes;
     boxes.reserve(children_.size() - start);
     for (size_t i = start; i < children_.size(); i++) {
-      boxes.push_back(std::dynamic_pointer_cast<CsgLeafNode>(children_[i])
+      boxes.push_back(std::static_pointer_cast<CsgLeafNode>(children_[i])
                           ->GetImpl()
                           ->bBox_);
     }
@@ -566,13 +573,13 @@ void CsgOpNode::BatchUnion() const {
     for (auto &set : disjointSets) {
       if (set.size() == 1) {
         impls.push_back(
-            std::dynamic_pointer_cast<CsgLeafNode>(children_[start + set[0]])
+            std::static_pointer_cast<CsgLeafNode>(children_[start + set[0]])
                 ->GetImpl());
       } else {
         std::vector<std::shared_ptr<CsgLeafNode>> tmp;
         for (size_t j : set) {
           tmp.push_back(
-              std::dynamic_pointer_cast<CsgLeafNode>(children_[start + j]));
+              std::static_pointer_cast<CsgLeafNode>(children_[start + j]));
         }
         impls.push_back(
             std::make_shared<const Manifold::Impl>(CsgLeafNode::Compose(tmp)));
