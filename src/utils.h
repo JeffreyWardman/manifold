@@ -100,6 +100,7 @@ inline int AtomicAdd(int& target, int add) {
   return old_val;
 }
 
+#ifndef _LIBCPP_HAS_NO_THREADS
 template <typename T>
 class ConcurrentSharedPtr {
  public:
@@ -129,6 +130,29 @@ class ConcurrentSharedPtr {
   std::shared_ptr<std::recursive_mutex> mutex =
       std::make_shared<std::recursive_mutex>();
 };
+#else
+template <typename T>
+class ConcurrentSharedPtr {
+ public:
+  ConcurrentSharedPtr(T value) : impl(std::make_shared<T>(value)) {}
+  ConcurrentSharedPtr(const ConcurrentSharedPtr<T>& other) : impl(other.impl) {}
+  class SharedPtrGuard {
+   public:
+    SharedPtrGuard(T* content) : content(content) {}
+
+    T& operator*() { return *content; }
+    T* operator->() { return content; }
+
+   private:
+    T* content;
+  };
+  SharedPtrGuard GetGuard() { return SharedPtrGuard(impl.get()); };
+  unsigned int UseCount() { return impl.use_count(); };
+
+ private:
+  std::shared_ptr<T> impl;
+};
+#endif
 
 template <typename I = int, typename R = unsigned char>
 struct UnionFind {

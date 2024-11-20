@@ -128,7 +128,9 @@ class Partition {
   }
 
  private:
+#ifndef _LIBCPP_HAS_NO_THREADS
   static inline auto cacheLock = std::mutex();
+#endif
   static inline auto cache =
       std::unordered_map<ivec4, std::unique_ptr<Partition>>();
 
@@ -139,7 +141,9 @@ class Partition {
   // triangles, the input must be sorted: n[0] >= n[1] >= n[2] > 0.
   static Partition GetCachedPartition(ivec4 n) {
     {
+#ifndef _LIBCPP_HAS_NO_THREADS
       auto lockGuard = std::lock_guard<std::mutex>(cacheLock);
+#endif
       auto cached = cache.find(n);
       if (cached != cache.end()) {
         return *cached->second;
@@ -238,7 +242,9 @@ class Partition {
       }
     }
 
+#ifndef _LIBCPP_HAS_NO_THREADS
     auto lockGuard = std::lock_guard<std::mutex>(cacheLock);
+#endif
     cache.insert({n, std::make_unique<Partition>(partition)});
     return partition;
   }
